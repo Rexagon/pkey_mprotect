@@ -8,12 +8,22 @@ use ::core::arch::x86 as arch;
 #[cfg(all(target_arch = "x86_64", not(target_env = "sgx")))]
 use ::core::arch::x86_64 as arch;
 
+/// Protection keys instance which is needed to create regions.
+///
+/// NOTE: You probably should always reuse it for creating regions
+/// because there are only 15 available keys in system
 #[derive(Default)]
 pub struct ProtectionKeys {
     handle: Option<libc::c_int>,
 }
 
 impl ProtectionKeys {
+    /// Creates protection keys instance.
+    ///
+    /// Requirements to successfully create keys:
+    ///
+    /// On failure will create a keys stub if `require_protected` is `false`,
+    /// returns an error otherwise.
     pub fn new(require_protected: bool) -> Result<Arc<Self>, ProtectionError> {
         // Check if protection keys are supported
         if !is_ospke_supported() {
@@ -51,6 +61,9 @@ impl ProtectionKeys {
         }
     }
 
+    /// Creates protected region.
+    ///
+    /// Arc with protected keys is cloned so it is safe to keep only the region.
     pub fn make_region<T>(
         self: &Arc<Self>,
         initial: T,
@@ -61,6 +74,7 @@ impl ProtectionKeys {
         ProtectedRegion::new(self, initial)
     }
 
+    /// Whether protection keys were allocated
     pub fn is_empty(&self) -> bool {
         self.handle.is_none()
     }
@@ -91,6 +105,7 @@ impl Drop for ProtectionKeys {
     }
 }
 
+/// Protected memory page with typed access to its data
 pub struct ProtectedRegion<T> {
     pkey: Arc<ProtectionKeys>,
     ptr: *mut libc::c_void,
@@ -153,6 +168,7 @@ impl<T> ProtectedRegion<T> {
         }))
     }
 
+    /// Creates region guard with read-only access to the data
     pub fn lock(&'_ self) -> ProtectedRegionGuard<'_, T> {
         ProtectedRegionGuard::new(self)
     }
@@ -179,6 +195,7 @@ impl<T> Drop for ProtectedRegion<T> {
 unsafe impl<T: Sync> Sync for ProtectedRegion<T> {}
 unsafe impl<T> Send for ProtectedRegion<T> {}
 
+/// See [`ProtectedRegion::lock()`]
 pub struct ProtectedRegionGuard<'a, T> {
     region: &'a ProtectedRegion<T>,
     _marker: std::marker::PhantomData<*const u8>,

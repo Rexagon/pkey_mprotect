@@ -1,5 +1,9 @@
 ## pkey_mprotect
-`pkey_mprotect` wrapper
+Typed `pkey_mprotect` wrapper.
+
+> Only works on Linux on CPUs with Memory Protection Keys support
+
+**MSRV: 1.57 (due to const panics)**
 
 ### Example
 ```rust
