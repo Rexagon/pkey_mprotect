@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -12,15 +14,12 @@ pub struct ProtectionKeys {
 }
 
 impl ProtectionKeys {
-    pub fn new(require_protected: bool) -> std::io::Result<Arc<Self>> {
+    pub fn new(require_protected: bool) -> Result<Arc<Self>, ProtectionError> {
         // Check if protection keys are supported
         if !is_ospke_supported() {
             return if require_protected {
                 // Return an error
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Unsupported,
-                    "protection keys are not supported by this CPU",
-                ))
+                Err(ProtectionError::Unsupported)
             } else {
                 // Return an empty handle if protection keys are not supported
                 log::error!(
@@ -41,7 +40,9 @@ impl ProtectionKeys {
             Ok(Arc::new(Self { handle: None }))
         } else if pkey < 0 {
             // Return an error if no protection keys left
-            Err(std::io::Error::last_os_error())
+            Err(ProtectionError::PkeyAllocationFailed(
+                std::io::Error::last_os_error(),
+            ))
         } else {
             // There are available protection keys
             Ok(Arc::new(Self {
@@ -50,7 +51,10 @@ impl ProtectionKeys {
         }
     }
 
-    pub fn make_region<T>(self: &Arc<Self>, initial: T) -> std::io::Result<Arc<ProtectedRegion<T>>>
+    pub fn make_region<T>(
+        self: &Arc<Self>,
+        initial: T,
+    ) -> Result<Arc<ProtectedRegion<T>>, ProtectionError>
     where
         T: Sized,
     {
@@ -96,7 +100,7 @@ pub struct ProtectedRegion<T> {
 impl<T> ProtectedRegion<T> {
     const _ASSERT: () = assert!(std::mem::size_of::<T>() <= PAGE_SIZE);
 
-    fn new(pkey: &Arc<ProtectionKeys>, initial: T) -> std::io::Result<Arc<Self>>
+    fn new(pkey: &Arc<ProtectionKeys>, initial: T) -> Result<Arc<Self>, ProtectionError>
     where
         T: Sized,
     {
@@ -113,7 +117,7 @@ impl<T> ProtectedRegion<T> {
             )
         };
         if ptr == libc::MAP_FAILED {
-            return Err(std::io::Error::last_os_error());
+            return Err(ProtectionError::MMapFailed(std::io::Error::last_os_error()));
         }
 
         // SAFETY: it is called with backward capability with mprotect
@@ -124,11 +128,13 @@ impl<T> ProtectedRegion<T> {
                 ptr as usize,
                 PAGE_SIZE,
                 libc::PROT_READ | libc::PROT_WRITE,
-                pkey.handle.unwrap_or_default(),
+                pkey.handle.unwrap_or(-1),
             )
         };
         if res < 0 {
-            return Err(std::io::Error::last_os_error());
+            return Err(ProtectionError::MProtectFailed(
+                std::io::Error::last_os_error(),
+            ));
         }
 
         // Enable memory access
@@ -243,6 +249,18 @@ extern "C" {
 const PKEY_DISABLE_ACCESS: usize = 1;
 
 const PAGE_SIZE: usize = 4096;
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProtectionError {
+    #[error("Protection keys are not supported by this CPU")]
+    Unsupported,
+    #[error("Failed to allocate protection keys")]
+    PkeyAllocationFailed(#[source] std::io::Error),
+    #[error("Failed to map memory")]
+    MMapFailed(#[source] std::io::Error),
+    #[error("Failed to protect memory")]
+    MProtectFailed(#[source] std::io::Error),
+}
 
 #[cfg(test)]
 mod tests {
