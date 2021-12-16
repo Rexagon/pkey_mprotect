@@ -18,6 +18,13 @@ pub struct ProtectionKeys {
 }
 
 impl ProtectionKeys {
+    /// Checks whether protection keys are supported.
+    ///
+    /// See https://www.felixcloutier.com/x86/wrpkru
+    pub fn is_supported() -> bool {
+        is_ospke_supported()
+    }
+
     /// Creates protection keys instance.
     ///
     /// Requirements to successfully create keys:
@@ -33,7 +40,7 @@ impl ProtectionKeys {
             } else {
                 // Return an empty handle if protection keys are not supported
                 log::error!(
-                    "Protections keys are not supported by this CPU. \
+                    "Protection keys are not supported by this CPU. \
                     Skipping keystore memory protection"
                 );
                 Ok(Arc::new(Self { handle: None }))
