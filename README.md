@@ -3,7 +3,7 @@ Typed `pkey_mprotect` wrapper.
 
 > Only works on Linux on CPUs with Memory Protection Keys support
 
-**MSRV: 1.57 (due to const panics)**
+**MSRV: 1.59 (due to const panics and `asm!` macro)**
 
 ### Example
 ```rust

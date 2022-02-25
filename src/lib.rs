@@ -265,9 +265,16 @@ fn cpuid_count(eax: u32, ecx: u32) -> CpuIdResult {
     }
 }
 
-#[link(name = "pkey-sys")]
-extern "C" {
-    fn pkey_set(pkeyu: libc::c_int, rights: libc::size_t) -> libc::c_int;
+unsafe fn pkey_set(pkeyu: libc::c_int, rights: libc::size_t) {
+    let eax = (rights << (2 * pkeyu as usize)) as u32;
+
+    std::arch::asm!(
+        ".byte 0x0f, 0x01, 0xef",
+        in("eax") eax,
+        in("ecx") 0,
+        in("edx") 0,
+        options(nomem, preserves_flags, nostack)
+    )
 }
 
 const PKEY_DISABLE_ACCESS: usize = 1;
