@@ -265,6 +265,11 @@ fn cpuid_count(eax: u32, ecx: u32) -> CpuIdResult {
     }
 }
 
+/// # Safety
+///
+/// Behavior is undefined if any of the following conditions are violated:
+/// * `WRPKRU` is not supported by current CPU
+/// * `rights` or `pkeyu` are invalid
 unsafe fn pkey_set(pkeyu: libc::c_int, rights: libc::size_t) {
     let eax = (rights << (2 * pkeyu as usize)) as u32;
 
