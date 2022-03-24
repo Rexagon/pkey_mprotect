@@ -169,6 +169,16 @@ impl<T> ProtectedRegion<T> {
             return Err(ProtectionError::MMapFailed(std::io::Error::last_os_error()));
         }
 
+        #[cfg(not(target_os = "linux"))]
+        {
+            let res = unsafe { libc::mprotect(ptr, PAGE_SIZE, libc::PROT_READ | libc::PROT_WRITE) };
+            if res < 0 {
+                return Err(ProtectionError::MProtectFailed(
+                    std::io::Error::last_os_error(),
+                ));
+            }
+        }
+
         #[cfg(target_os = "linux")]
         {
             // SAFETY: it is called with backward capability with mprotect
