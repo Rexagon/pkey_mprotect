@@ -40,7 +40,7 @@ impl ProtectionKeys {
             } else {
                 // Return an empty handle if protection keys are not supported
                 log::error!(
-                    "Protection keys are not supported by this CPU. \
+                    "Protection keys are not supported by this CPU or OS. \
                     Skipping keystore memory protection"
                 );
                 Ok(Arc::new(ProtectionKeys { handle: None }))
@@ -48,6 +48,7 @@ impl ProtectionKeys {
         }
 
         #[cfg(not(target_os = "linux"))]
+        #[allow(clippy::needless_return)]
         return stub(require_protected);
 
         #[cfg(target_os = "linux")]
@@ -98,13 +99,28 @@ impl ProtectionKeys {
     }
 
     fn set(&self, rights: usize) {
+        #[cfg(not(target_os = "linux"))]
+        let _unused = rights;
+
+        #[cfg(target_os = "linux")]
         if let Some(handle) = self.handle {
-            // SAFETY: handle will only be Some if WRPKRU command is supported
-            unsafe { pkey_set(handle, rights) };
+            // SAFETY: handle will only be Some if `WRPKRU` command is supported
+            unsafe {
+                let eax = (rights << (2 * handle as usize)) as u32;
+
+                std::arch::asm!(
+                    ".byte 0x0f, 0x01, 0xef",
+                    in("eax") eax,
+                    in("ecx") 0,
+                    in("edx") 0,
+                    options(nomem, preserves_flags, nostack)
+                )
+            }
         }
     }
 }
 
+#[cfg(target_os = "linux")]
 impl Drop for ProtectionKeys {
     fn drop(&mut self) {
         let handle = match self.handle {
@@ -153,21 +169,24 @@ impl<T> ProtectedRegion<T> {
             return Err(ProtectionError::MMapFailed(std::io::Error::last_os_error()));
         }
 
-        // SAFETY: it is called with backward capability with mprotect
-        // https://man7.org/linux/man-pages/man2/mprotect.2.html
-        let res = unsafe {
-            libc::syscall(
-                libc::SYS_pkey_mprotect,
-                ptr as usize,
-                PAGE_SIZE,
-                libc::PROT_READ | libc::PROT_WRITE,
-                pkey.handle.unwrap_or(-1),
-            )
-        };
-        if res < 0 {
-            return Err(ProtectionError::MProtectFailed(
-                std::io::Error::last_os_error(),
-            ));
+        #[cfg(target_os = "linux")]
+        {
+            // SAFETY: it is called with backward capability with mprotect
+            // https://man7.org/linux/man-pages/man2/mprotect.2.html
+            let res = unsafe {
+                libc::syscall(
+                    libc::SYS_pkey_mprotect,
+                    ptr as usize,
+                    PAGE_SIZE,
+                    libc::PROT_READ | libc::PROT_WRITE,
+                    pkey.handle.unwrap_or(-1),
+                )
+            };
+            if res < 0 {
+                return Err(ProtectionError::MProtectFailed(
+                    std::io::Error::last_os_error(),
+                ));
+            }
         }
 
         // Enable memory access
@@ -274,23 +293,6 @@ fn cpuid_count(eax: u32, ecx: u32) -> CpuIdResult {
         eax: result.eax,
         ecx: result.ecx,
     }
-}
-
-/// # Safety
-///
-/// Behavior is undefined if any of the following conditions are violated:
-/// * `WRPKRU` is not supported by current CPU
-/// * `rights` or `pkeyu` are invalid
-unsafe fn pkey_set(pkeyu: libc::c_int, rights: libc::size_t) {
-    let eax = (rights << (2 * pkeyu as usize)) as u32;
-
-    std::arch::asm!(
-        ".byte 0x0f, 0x01, 0xef",
-        in("eax") eax,
-        in("ecx") 0,
-        in("edx") 0,
-        options(nomem, preserves_flags, nostack)
-    )
 }
 
 const PKEY_DISABLE_ACCESS: usize = 1;
