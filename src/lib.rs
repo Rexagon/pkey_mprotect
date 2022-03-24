@@ -32,9 +32,9 @@ impl ProtectionKeys {
     /// On failure will create a keys stub if `require_protected` is `false`,
     /// returns an error otherwise.
     pub fn new(require_protected: bool) -> Result<Arc<Self>, ProtectionError> {
-        // Check if protection keys are supported
-        if !is_ospke_supported() {
-            return if require_protected {
+        #[inline(always)]
+        fn stub(require_protected: bool) -> Result<Arc<ProtectionKeys>, ProtectionError> {
+            if require_protected {
                 // Return an error
                 Err(ProtectionError::Unsupported)
             } else {
@@ -43,28 +43,39 @@ impl ProtectionKeys {
                     "Protection keys are not supported by this CPU. \
                     Skipping keystore memory protection"
                 );
-                Ok(Arc::new(Self { handle: None }))
-            };
+                Ok(Arc::new(ProtectionKeys { handle: None }))
+            }
         }
 
-        // SAFETY: syscall will either return -1 if SYS_pkey_alloc is not supported
-        // or return result according to https://man7.org/linux/man-pages/man2/pkey_alloc.2.html
-        let pkey = unsafe { libc::syscall(libc::SYS_pkey_alloc, 0usize, PKEY_DISABLE_ACCESS) };
+        #[cfg(not(target_os = "linux"))]
+        return stub(require_protected);
 
-        if pkey < 0 && !require_protected {
-            // Return an empty handle if no protection keys left
-            log::error!("Protection keys allocation failed");
-            Ok(Arc::new(Self { handle: None }))
-        } else if pkey < 0 {
-            // Return an error if no protection keys left
-            Err(ProtectionError::PkeyAllocationFailed(
-                std::io::Error::last_os_error(),
-            ))
-        } else {
-            // There are available protection keys
-            Ok(Arc::new(Self {
-                handle: Some(pkey as libc::c_int),
-            }))
+        #[cfg(target_os = "linux")]
+        {
+            // Check if protection keys are supported
+            if !is_ospke_supported() {
+                return stub(require_protected);
+            }
+
+            // SAFETY: syscall will either return -1 if SYS_pkey_alloc is not supported
+            // or return result according to https://man7.org/linux/man-pages/man2/pkey_alloc.2.html
+            let pkey = unsafe { libc::syscall(libc::SYS_pkey_alloc, 0usize, PKEY_DISABLE_ACCESS) };
+
+            if pkey < 0 && !require_protected {
+                // Return an empty handle if no protection keys left
+                log::error!("Protection keys allocation failed");
+                Ok(Arc::new(Self { handle: None }))
+            } else if pkey < 0 {
+                // Return an error if no protection keys left
+                Err(ProtectionError::PkeyAllocationFailed(
+                    std::io::Error::last_os_error(),
+                ))
+            } else {
+                // There are available protection keys
+                Ok(Arc::new(Self {
+                    handle: Some(pkey as libc::c_int),
+                }))
+            }
         }
     }
 
