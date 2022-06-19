@@ -99,10 +99,10 @@ impl ProtectionKeys {
     }
 
     fn set(&self, rights: usize) {
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(any(not(target_arch = "x86_64"), not(target_os = "linux")))]
         let _unused = rights;
 
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
         if let Some(handle) = self.handle {
             // SAFETY: handle will only be Some if `WRPKRU` command is supported
             unsafe {
@@ -274,10 +274,26 @@ impl<T> Drop for ProtectedRegionGuard<'_, T> {
 }
 
 /// See https://www.felixcloutier.com/x86/wrpkru
+#[cfg(target_arch = "x86_64")]
 fn is_ospke_supported() -> bool {
     const EAX_VENDOR_INFO: u32 = 0x0;
     const EAX_STRUCTURED_EXTENDED_FEATURE_INFO: u32 = 0x7;
     const OSPKE_BIT: u32 = 0b10000;
+
+    struct CpuIdResult {
+        eax: u32,
+        ecx: u32,
+    }
+
+    fn cpuid_count(eax: u32, ecx: u32) -> CpuIdResult {
+        // Safety: CPUID is supported on all x86_64 CPUs and all x86 CPUs with
+        // SSE, but not by SGX.
+        let result = unsafe { arch::__cpuid_count(eax, ecx) };
+        CpuIdResult {
+            eax: result.eax,
+            ecx: result.ecx,
+        }
+    }
 
     // Check if extended feature info leaf is supported
     let vendor_leaf = cpuid_count(EAX_VENDOR_INFO, 0);
@@ -290,19 +306,9 @@ fn is_ospke_supported() -> bool {
     info.ecx & OSPKE_BIT == OSPKE_BIT
 }
 
-struct CpuIdResult {
-    eax: u32,
-    ecx: u32,
-}
-
-fn cpuid_count(eax: u32, ecx: u32) -> CpuIdResult {
-    // Safety: CPUID is supported on all x86_64 CPUs and all x86 CPUs with
-    // SSE, but not by SGX.
-    let result = unsafe { self::arch::__cpuid_count(eax, ecx) };
-    CpuIdResult {
-        eax: result.eax,
-        ecx: result.ecx,
-    }
+#[cfg(not(target_arch = "x86_64"))]
+fn is_ospke_supported() -> bool {
+    false
 }
 
 const PKEY_DISABLE_ACCESS: usize = 1;
